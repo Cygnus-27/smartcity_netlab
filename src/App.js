@@ -711,7 +711,7 @@ function App() {
               </p>
             </div>
             <div className="glass-panel" style={{ padding: '1.5rem', backgroundColor: 'var(--bg-primary)' }}>
-              <HeartPulse size={32} color="#3b82f6" style={{ marginBottom: '1rem' }} />
+              <HeartPulse size={32} color="var(--accent)" style={{ marginBottom: '1rem' }} />
               <h4>Healthcare Telemetry</h4>
               <p style={{ fontSize: '0.875rem', marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
                 Reliable routing maintains the integrity of remote patient telemetry where low packet loss is critical.
@@ -738,7 +738,7 @@ function App() {
               <h3>Link-State (OSPF)</h3>
               <p style={{ color: 'var(--text-secondary)' }}>Performs optimally in large-scale networks with high traffic loads and frequent topology changes due to rapid convergence and loop-free operation via Dijkstra's SPF.</p>
             </div>
-            <div className="glass-panel" style={{ borderLeft: '4px solid #8b5cf6' }}>
+            <div className="glass-panel" style={{ borderLeft: '4px solid #10B981' }}>
               <h3>Distance Vector (RIP)</h3>
               <p style={{ color: 'var(--text-secondary)' }}>Better suited for localized, low-complexity edge networks where computational resource conservation is more critical than sub-second convergence.</p>
             </div>
