@@ -421,6 +421,11 @@ ul.styled-list li::before {
   color: white;
 }
 
+.network-sandbox.dragging .node,
+.network-sandbox.selecting .node {
+  transition: none !important;
+}
+
 .node.active {
   background-color: var(--accent);
   color: white;

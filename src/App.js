@@ -91,6 +91,9 @@ function Sandbox({
   const [mode, setMode] = useState('idle'); // addNode, addLink, delete, failLink, idle
   const [simState, setSimState] = useState('idle'); // idle, calculating, ready
 
+  const [selectedNodes, setSelectedNodes] = useState([]); // Array of node IDs
+  const [selectionBox, setSelectionBox] = useState(null); // { x1, y1, x2, y2 }
+
   // Interaction State
   const [selectedNode, setSelectedNode] = useState(null); // Used for link connecting
   const [draggingNode, setDraggingNode] = useState(null);
@@ -183,6 +186,20 @@ function Sandbox({
   };
 
   // --- Canvas Interaction ---
+  const handleSandboxMouseDown = (e) => {
+    if (isLocked || mode !== 'idle') return;
+    if (e.target !== sandboxRef.current) return;
+
+    const rect = sandboxRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    setSelectionBox({ x1: x, y1: y, x2: x, y2: y });
+    if (!e.ctrlKey) {
+      setSelectedNodes([]);
+    }
+  };
+
   const handleSandboxClick = (e) => {
     if (isLocked) return;
     if (mode === 'addNode' && sandboxRef.current) {
@@ -208,8 +225,10 @@ function Sandbox({
     if (isLocked) return;
 
     if (mode === 'delete') {
-      setNodes(nodes.filter(n => n.id !== targetNode.id));
-      setLinks(links.filter(l => l.source !== targetNode.id && l.target !== targetNode.id));
+      const toDelete = selectedNodes.includes(targetNode.id) ? selectedNodes : [targetNode.id];
+      setNodes(nodes.filter(n => !toDelete.includes(n.id)));
+      setLinks(links.filter(l => !toDelete.includes(l.source) && !toDelete.includes(l.target)));
+      setSelectedNodes([]);
     }
     else if (mode === 'addLink') {
       if (!selectedNode) {
@@ -246,52 +265,113 @@ function Sandbox({
     }
   };
 
-  // --- Drag & Drop ---
+  // --- Drag & Drop & Selection ---
   const handleNodeMouseDown = (e, node) => {
     e.stopPropagation();
     if (isLocked || mode !== 'idle') return;
 
-    // Calculate offset from node center to mouse cursor
+    const isAlreadySelected = selectedNodes.includes(node.id);
+    let currentSelection = [...selectedNodes];
+    
+    if (e.ctrlKey) {
+      if (isAlreadySelected) {
+        currentSelection = currentSelection.filter(id => id !== node.id);
+      } else {
+        currentSelection.push(node.id);
+      }
+      setSelectedNodes(currentSelection);
+    } else {
+      if (!isAlreadySelected) {
+        currentSelection = [node.id];
+        setSelectedNodes(currentSelection);
+      }
+      // If it IS already selected, we don't clear it yet, 
+      // allowing the user to start a group drag.
+    }
+
+    // Capture state for the duration of the drag
     const rect = sandboxRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
     setDraggingNode({
-      id: node.id,
-      offsetX: mouseX - node.x,
-      offsetY: mouseY - node.y
+      mouseX,
+      mouseY,
+      initialPositions: nodes.reduce((acc, n) => {
+        if (currentSelection.includes(n.id)) {
+           acc[n.id] = { x: n.x, y: n.y };
+        }
+        return acc;
+      }, {})
     });
   };
 
   useEffect(() => {
     const handleMouseMove = (e) => {
-      if (!draggingNode || !sandboxRef.current || isLocked) return;
+      if (!sandboxRef.current || isLocked) return;
       const rect = sandboxRef.current.getBoundingClientRect();
-      const rawX = e.clientX - rect.left - draggingNode.offsetX;
-      const rawY = e.clientY - rect.top - draggingNode.offsetY;
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
 
-      // We don't resolve collision on EVERY pixel move to prevent jitter, just clamp
-      const bounds = sandboxRef.current.getBoundingClientRect();
-      const x = Math.max(NODE_RADIUS, Math.min(rawX, bounds.width - NODE_RADIUS));
-      const y = Math.max(NODE_RADIUS, Math.min(rawY, bounds.height - NODE_RADIUS));
+      if (draggingNode) {
+        const dx = mouseX - draggingNode.mouseX;
+        const dy = mouseY - draggingNode.mouseY;
 
-      setNodes(prev => prev.map(n => n.id === draggingNode.id ? { ...n, x, y } : n));
-    };
+        setNodes(prev => prev.map(n => {
+          if (draggingNode.initialPositions[n.id]) {
+            const newX = draggingNode.initialPositions[n.id].x + dx;
+            const newY = draggingNode.initialPositions[n.id].y + dy;
+            
+            // Clamping
+            const x = Math.max(NODE_RADIUS, Math.min(newX, rect.width - NODE_RADIUS));
+            const y = Math.max(NODE_RADIUS, Math.min(newY, rect.height - NODE_RADIUS));
+            return { ...n, x, y };
+          }
+          return n;
+        }));
+      } else if (selectionBox) {
+        setSelectionBox(prev => ({ ...prev, x2: mouseX, y2: mouseY }));
+        
+        const xMin = Math.min(selectionBox.x1, mouseX);
+        const xMax = Math.max(selectionBox.x1, mouseX);
+        const yMin = Math.min(selectionBox.y1, mouseY);
+        const yMax = Math.max(selectionBox.y1, mouseY);
 
-    const handleMouseUp = () => {
-      if (draggingNode && !isLocked) {
-        // Enforce collision detection when dropping
-        setNodes(prev => {
-          const target = prev.find(n => n.id === draggingNode.id);
-          if (!target) return prev;
-          const { x, y } = resolveCollision(target.x, target.y, target.id, prev);
-          return prev.map(n => n.id === draggingNode.id ? { ...n, x, y } : n);
+        // This filter still needs 'nodes' but if we reference nodes here, 
+        // the effects re-enters. We use a functional update on setSelectedNodes.
+        setSelectedNodes(prevSelected => {
+           // We can't access 'nodes' directly without triggering re-exec, 
+           // but we need it for selection box. 
+           // Using a tiny closure to get last nodes.
+           const inBox = nodes.filter(n => 
+             n.x >= xMin && n.x <= xMax && n.y >= yMin && n.y <= yMax
+           ).map(n => n.id);
+           
+           if (e.ctrlKey) return Array.from(new Set([...prevSelected, ...inBox]));
+           return inBox;
         });
-        setDraggingNode(null);
       }
     };
 
-    if (draggingNode) {
+    const handleMouseUp = (e) => {
+      if (draggingNode) {
+        const rect = sandboxRef.current.getBoundingClientRect();
+        const startMouseX = draggingNode.mouseX;
+        const startMouseY = draggingNode.mouseY;
+        const endMouseX = e.clientX - rect.left;
+        const endMouseY = e.clientY - rect.top;
+        
+        // If it was just a click (no drag), we update selection strictly
+        if (Math.hypot(endMouseX - startMouseX, endMouseY - startMouseY) < 3 && !e.ctrlKey) {
+           // Find which node we clicked? Actually simplest is to just rely on handleNodeMouseDown
+           // But if we're here, we click-released.
+        }
+      }
+      setDraggingNode(null);
+      setSelectionBox(null);
+    };
+
+    if (draggingNode || selectionBox) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
     }
@@ -299,7 +379,9 @@ function Sandbox({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [draggingNode, isLocked, resolveCollision, setNodes]);
+    // Removed nodes from dependency to prevent re-registering listener on every pixel move
+    // This is vital for performance.
+  }, [draggingNode, selectionBox, isLocked, setNodes]);
 
   // --- Simulation Logic ---
   const runSimulation = () => {
@@ -572,12 +654,28 @@ function Sandbox({
           </div>
         </div>
 
-        {/* Sandbox Canvas */}
         <div
           ref={sandboxRef}
-          className={`network-sandbox ${mode === 'addNode' ? 'adding' : mode === 'addLink' ? 'linking' : mode === 'delete' ? 'deleting' : mode === 'failLink' ? 'failing' : ''}`}
+          className={`network-sandbox ${mode === 'addNode' ? 'adding' : mode === 'addLink' ? 'linking' : mode === 'delete' ? 'deleting' : mode === 'failLink' ? 'failing' : ''} ${draggingNode ? 'dragging' : ''} ${selectionBox ? 'selecting' : ''}`}
           onClick={handleSandboxClick}
+          onMouseDown={handleSandboxMouseDown}
         >
+          {selectionBox && (
+            <div 
+              style={{
+                position: 'absolute',
+                left: Math.min(selectionBox.x1, selectionBox.x2),
+                top: Math.min(selectionBox.y1, selectionBox.y2),
+                width: Math.abs(selectionBox.x2 - selectionBox.x1),
+                height: Math.abs(selectionBox.y2 - selectionBox.y1),
+                backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                border: '1px solid var(--accent)',
+                zIndex: 100,
+                pointerEvents: 'none'
+              }}
+            />
+          )}
+
           {/* Edge/Link Renderer */}
           <svg style={{ position: 'absolute', width: '100%', height: '100%', top: 0, left: 0, zIndex: 1, pointerEvents: 'none' }}>
             <defs>
@@ -618,7 +716,8 @@ function Sandbox({
 
           {/* Node Renderer */}
           {nodes.map((node) => {
-            const isSelected = selectedNode?.id === node.id && mode === 'addLink';
+            const isSelectedLink = selectedNode?.id === node.id && mode === 'addLink';
+            const isSelected = selectedNodes.includes(node.id);
             const currentStepData = simSteps[currentStep];
             const nodeCaption = currentStepData?.captions?.[node.id];
             const isDone = currentStepData && currentStep === simSteps.length - 1;
@@ -626,7 +725,7 @@ function Sandbox({
             return (
               <div
                 key={node.id}
-                className={`node ${isSelected ? 'selected' : ''} ${(nodeCaption || isDone) ? 'active' : ''} ${isLocked ? 'locked' : ''}`}
+                className={`node ${isSelectedLink ? 'selected' : ''} ${isSelected ? 'active' : ''} ${(nodeCaption || isDone) ? 'active' : ''} ${isLocked ? 'locked' : ''}`}
                 style={{ left: node.x, top: node.y }}
                 onMouseDown={(e) => handleNodeMouseDown(e, node)}
                 onClick={(e) => handleNodeClick(e, node)}
