@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Network, Activity, Clock, ShieldAlert, HeartPulse, Map, Share2, AlertTriangle, Sun, Moon, PlusCircle, Link as LinkIconDuo, Trash2, Settings2, Play, RotateCcw, Pause, FastForward, Rewind } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Network, Activity, Clock, ShieldAlert, HeartPulse, Map, Share2, AlertTriangle, Sun, Moon, PlusCircle, Link as LinkIconDuo, Trash2, Settings2, Play, RotateCcw, Pause, FastForward, Rewind, Bot, Layout, ChevronLeft, ChevronRight, GraduationCap, Loader2 } from 'lucide-react';
+import { generateTopology, analyzeNetwork } from './ai_service';
 
 function ThemeToggle({ theme, toggleTheme }) {
   return (
@@ -29,16 +30,16 @@ function generateId() {
   return Math.random().toString(36).substr(2, 9);
 }
 
-function getOSPFFavoredTopology() {
+function getOSPFFavoredTopology(w = 1000, h = 500) {
   const n0 = generateId(), n1 = generateId(), n2 = generateId(), n3 = generateId(), n4 = generateId(), n5 = generateId();
   return {
     nodes: [
-      { id: n0, x: 200, y: 150, label: 'Core1' },
-      { id: n1, x: 200, y: 350, label: 'Core2' },
-      { id: n2, x: 450, y: 250, label: 'Hub' },
-      { id: n3, x: 700, y: 150, label: 'Edge1' },
-      { id: n4, x: 700, y: 350, label: 'Edge2' },
-      { id: n5, x: 850, y: 250, label: 'Target' },
+      { id: n0, x: w * 0.2, y: h * 0.3, label: 'Core1' },
+      { id: n1, x: w * 0.2, y: h * 0.7, label: 'Core2' },
+      { id: n2, x: w * 0.5, y: h * 0.5, label: 'Hub' },
+      { id: n3, x: w * 0.75, y: h * 0.3, label: 'Edge1' },
+      { id: n4, x: w * 0.75, y: h * 0.7, label: 'Edge2' },
+      { id: n5, x: w * 0.9, y: h * 0.5, label: 'Target' },
     ],
     links: [
       { id: generateId(), source: n0, target: n1, fails: false },
@@ -55,17 +56,17 @@ function getOSPFFavoredTopology() {
   };
 }
 
-function getRIPFavoredTopology() {
+function getRIPFavoredTopology(w = 1000, h = 500) {
   const n0 = generateId(), n1 = generateId(), n2 = generateId(), n3 = generateId(), n4 = generateId(), n5 = generateId(), n6 = generateId();
   return {
     nodes: [
-      { id: n0, x: 100, y: 250, label: 'R1' },
-      { id: n1, x: 300, y: 150, label: 'R2' },
-      { id: n2, x: 300, y: 350, label: 'R3' },
-      { id: n3, x: 500, y: 250, label: 'R4' },
-      { id: n4, x: 700, y: 150, label: 'R5' },
-      { id: n5, x: 700, y: 350, label: 'R6' },
-      { id: n6, x: 900, y: 250, label: 'R7' },
+      { id: n0, x: w * 0.1, y: h * 0.5, label: 'R1' },
+      { id: n1, x: w * 0.25, y: h * 0.3, label: 'R2' },
+      { id: n2, x: w * 0.25, y: h * 0.7, label: 'R3' },
+      { id: n3, x: w * 0.5, y: h * 0.5, label: 'R4' },
+      { id: n4, x: w * 0.75, y: h * 0.3, label: 'R5' },
+      { id: n5, x: w * 0.75, y: h * 0.7, label: 'R6' },
+      { id: n6, x: w * 0.9, y: h * 0.5, label: 'R7' },
     ],
     links: [
       { id: generateId(), source: n0, target: n1, fails: false },
@@ -80,13 +81,15 @@ function getRIPFavoredTopology() {
   };
 }
 
-function Sandbox() {
-  const [nodes, setNodes] = useState([]);
-  const [links, setLinks] = useState([]);
+function Sandbox({ 
+  nodes, setNodes, 
+  links, setLinks, 
+  protocol, setProtocol,
+  onSimulationComplete 
+}) {
 
   const [mode, setMode] = useState('idle'); // addNode, addLink, delete, failLink, idle
   const [simState, setSimState] = useState('idle'); // idle, calculating, ready
-  const [protocol, setProtocol] = useState('OSPF');
 
   // Interaction State
   const [selectedNode, setSelectedNode] = useState(null); // Used for link connecting
@@ -106,7 +109,7 @@ function Sandbox() {
   const isLocked = simState === 'calculating' || simState === 'ready';
 
   // --- Collision Avoidance Helper ---
-  const resolveCollision = (x, y, ignoreId = null, currentNodes = nodes) => {
+  const resolveCollision = useCallback((x, y, ignoreId = null, currentNodes = nodes) => {
     let finalX = x;
     let finalY = y;
     let collisionDetected = true;
@@ -133,12 +136,13 @@ function Sandbox() {
       finalY = Math.max(NODE_RADIUS, Math.min(finalY, bounds.height - NODE_RADIUS));
     }
     return { x: finalX, y: finalY };
-  };
+  }, [nodes]);
 
   // --- Toolbar Actions ---
   const handleGenerateOSPF = () => {
     if (isLocked) return;
-    const { nodes: sn, links: sl } = getOSPFFavoredTopology();
+    const { width, height } = sandboxRef.current?.getBoundingClientRect() || { width: 1000, height: 500 };
+    const { nodes: sn, links: sl } = getOSPFFavoredTopology(width, height);
     setNodes(sn);
     setLinks(sl);
     setMode('idle');
@@ -149,7 +153,8 @@ function Sandbox() {
 
   const handleGenerateRIP = () => {
     if (isLocked) return;
-    const { nodes: sn, links: sl } = getRIPFavoredTopology();
+    const { width, height } = sandboxRef.current?.getBoundingClientRect() || { width: 1000, height: 500 };
+    const { nodes: sn, links: sl } = getRIPFavoredTopology(width, height);
     setNodes(sn);
     setLinks(sl);
     setMode('idle');
@@ -294,7 +299,7 @@ function Sandbox() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [draggingNode, isLocked]);
+  }, [draggingNode, isLocked, resolveCollision, setNodes]);
 
   // --- Simulation Logic ---
   const runSimulation = () => {
@@ -443,8 +448,19 @@ function Sandbox() {
     if (simSteps[currentStep]) {
       setTime(simSteps[currentStep].time || 0);
       setMessages(simSteps[currentStep].messages || 0);
+
+      // Trigger Audit when simulation finishes
+      if (currentStep === simSteps.length - 1 && simSteps.length > 0 && onSimulationComplete) {
+        onSimulationComplete({
+          nodes,
+          links,
+          protocol,
+          time: simSteps[currentStep].time,
+          messages: simSteps[currentStep].messages
+        });
+      }
     }
-  }, [currentStep, simSteps]);
+  }, [currentStep, simSteps, nodes, links, protocol, onSimulationComplete]);
 
 
   // Helper to map links to coordinates
@@ -657,6 +673,53 @@ function Sandbox() {
 
 function App() {
   const [theme, setTheme] = useState('dark');
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
+
+  // Network State (Lifted from Sandbox)
+  const [nodes, setNodes] = useState([]);
+  const [links, setLinks] = useState([]);
+  const [protocol, setProtocol] = useState('OSPF');
+
+  // AI State
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [isAiGenerating, setIsAiGenerating] = useState(false);
+  const [aiError, setAiError] = useState(null);
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
+  const [auditError, setAuditError] = useState(null);
+
+  const handleAiGenerate = async () => {
+    if (!aiPrompt.trim()) return;
+    setIsAiGenerating(true);
+    setAiError(null);
+    try {
+      const topology = await generateTopology(aiPrompt);
+      if (topology.nodes && topology.links) {
+        setNodes(topology.nodes);
+        setLinks(topology.links);
+        setAiPrompt("");
+      }
+    } catch (err) {
+      setAiError(err.message);
+    } finally {
+      setIsAiGenerating(false);
+    }
+  };
+
+  const handleSimulationComplete = async (data) => {
+    setIsAiAnalyzing(true);
+    setAiAnalysis(null);
+    setAuditError(null);
+    try {
+      const analysis = await analyzeNetwork(data);
+      setAiAnalysis(analysis);
+    } catch (err) {
+      setAuditError("Audit failed: " + err.message);
+    } finally {
+      setIsAiAnalyzing(false);
+    }
+  };
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -669,87 +732,167 @@ function App() {
   return (
     <div className="app-container">
       <header className="header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 'bold', fontSize: '1.25rem', color: 'var(--accent)' }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontWeight: "bold", fontSize: "1.25rem", color: "var(--accent)" }}>
           <Network size={28} />
           SmartCity NetLab
         </div>
-        <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
+        <div style={{ display: "flex", gap: "1.5rem", alignItems: "center" }}>
+           <a href="https://github.com" target="_blank" rel="noreferrer" style={{ color: "var(--text-secondary)", display: 'flex', alignItems: 'center', gap: '0.4rem', textDecoration: 'none', fontSize: '0.9rem' }}>
+              <Activity size={18} /> Source
+           </a>
+           <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
+        </div>
       </header>
 
-      <main>
-        <div className="hero">
-          <h1>Network Layer Dynamics</h1>
-          <p>Autonomous Path Selection & Data Plane Efficiency in Modern Smart City Infrastructures</p>
-        </div>
+      <div className="layout-root">
+        {/* Left Sidebar: Knowledge Hub */}
+        <aside className={`sidebar ${!leftOpen ? 'collapsed' : ''}`}>
+           <div style={{ padding: '2rem' }}>
+              <Section title="The Challenge" icon={Activity}>
+                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                  Smart City networks operate at a scale and traffic intensity far exceeding conventional enterprise grids. They require extreme sensitivity to delay and high dynamic mobility.
+                </p>
+              </Section>
 
-        <Section title="The Challenge in Smart Cities" icon={Activity}>
-          <div className="grid-2">
-            <div>
-              <h3>Traditional Constraints</h3>
-              <p style={{ color: 'var(--text-secondary)' }}>
-                Traditional routing protocols like RIP and OSPF were designed for conventional enterprise networks. Smart City networks, however, operate at a much larger scale, with high dynamic mobility, traffic intensity, and extreme sensitivity to delay.
-              </p>
-            </div>
-            <div>
-              <h3>Core Areas of Investigation</h3>
-              <ul className="styled-list">
-                <li><strong>Convergence Behavior:</strong> "Count-to-Infinity" via Bellman-Ford vs Link-State flooding.</li>
-                <li><strong>Scalability:</strong> Managing routing tables as networks grow to O(N).</li>
-                <li><strong>Protocol Overhead:</strong> Bandwidth consumption of periodic vs triggered updates.</li>
-              </ul>
-            </div>
+              <Section title="Social Impact" icon={HeartPulse}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div className="glass-panel" style={{ padding: '1rem', marginBottom: 0 }}>
+                    <ShieldAlert size={20} color="#ef4444" />
+                    <h5 style={{ margin: '0.5rem 0' }}>Public Safety</h5>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Ensuring reliability for first responder alerts.</p>
+                  </div>
+                  <div className="glass-panel" style={{ padding: '1rem', marginBottom: 0 }}>
+                    <Map size={20} color="#10b981" />
+                    <h5 style={{ margin: '0.5rem 0' }}>Urban Mobility</h5>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Real-time traffic orchestration.</p>
+                  </div>
+                </div>
+              </Section>
+
+              <Section title="Resource Library" icon={GraduationCap}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                   <div className="glass-panel resource-card" style={{ padding: '0.75rem', marginBottom: 0 }}>
+                      <div className="resource-header">
+                         <span className="badge">BOOK</span>
+                         <span className="resource-year">1976</span>
+                      </div>
+                      <h4 style={{ margin: '0.25rem 0', fontSize: '0.8rem' }}>Queueing Systems</h4>
+                      <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>L. Kleinrock - The foundation of packet switching.</p>
+                      <a href="https://dl.acm.org/doi/book/10.5555/539611" target="_blank" rel="noreferrer" className="resource-link">View Repository</a>
+                   </div>
+
+                   <div className="glass-panel resource-card" style={{ padding: '0.75rem', marginBottom: 0 }}>
+                      <div className="resource-header">
+                         <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>RFC</span>
+                         <span className="resource-year">1998</span>
+                      </div>
+                      <h4 style={{ margin: '0.25rem 0', fontSize: '0.8rem' }}>OSPF Version 2</h4>
+                      <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>RFC 2328 - Link-state routing architecture.</p>
+                      <a href="https://datatracker.ietf.org/doc/html/rfc2328" target="_blank" rel="noreferrer" className="resource-link">Read Standard</a>
+                   </div>
+
+                   <div className="glass-panel resource-card" style={{ padding: '0.75rem', marginBottom: 0 }}>
+                      <div className="resource-header">
+                         <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#34d399' }}>CASE STUDY</span>
+                         <span className="resource-year">2022</span>
+                      </div>
+                      <h4 style={{ margin: '0.25rem 0', fontSize: '0.8rem' }}>Urban Networking</h4>
+                      <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Barcelona Smart City - Real-time mesh grid deployment.</p>
+                      <a href="https://www.barcelona.cat/en/" target="_blank" rel="noreferrer" className="resource-link">Case Analysis</a>
+                   </div>
+
+                   <div className="glass-panel resource-card" style={{ padding: '0.75rem', marginBottom: 0 }}>
+                      <div className="resource-header">
+                         <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24' }}>LECTURE</span>
+                         <span className="resource-year">STW</span>
+                      </div>
+                      <h4 style={{ margin: '0.25rem 0', fontSize: '0.8rem' }}>Graph Theory in Nets</h4>
+                      <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Visualizing Bellman-Ford vs Dijkstra's complexity.</p>
+                      <a href="https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-fall-2011/resources/lecture-16-dijkstra/" target="_blank" rel="noreferrer" className="resource-link">MIT OpenCourse</a>
+                   </div>
+                </div>
+              </Section>
+           </div>
+        </aside>
+
+        {/* Center: Operation & Simulation Zone */}
+        <main className="main-content">
+          <div className="hero">
+            <h1>Network Layer Dynamics</h1>
+            <p style={{ fontSize: '1rem', opacity: 0.8 }}>Autonomous Path Selection & Data Plane Efficiency</p>
           </div>
-        </Section>
 
-        <Section title="Social Impact & Utility" icon={HeartPulse}>
-          <div className="grid-3">
-            <div className="glass-panel" style={{ padding: '1.5rem', backgroundColor: 'var(--bg-primary)' }}>
-              <ShieldAlert size={32} color="#ef4444" style={{ marginBottom: '1rem' }} />
-              <h4>Public Safety</h4>
-              <p style={{ fontSize: '0.875rem', marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
-                Minimizing convergence ensures high-priority alerts reach first responders without delay.
-              </p>
-            </div>
-            <div className="glass-panel" style={{ padding: '1.5rem', backgroundColor: 'var(--bg-primary)' }}>
-              <HeartPulse size={32} color="var(--accent)" style={{ marginBottom: '1rem' }} />
-              <h4>Healthcare Telemetry</h4>
-              <p style={{ fontSize: '0.875rem', marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
-                Reliable routing maintains the integrity of remote patient telemetry where low packet loss is critical.
-              </p>
-            </div>
-            <div className="glass-panel" style={{ padding: '1.5rem', backgroundColor: 'var(--bg-primary)' }}>
-              <Map size={32} color="#10b981" style={{ marginBottom: '1rem' }} />
-              <h4>Urban Mobility</h4>
-              <p style={{ fontSize: '0.875rem', marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
-                Efficient path selection prevents latency in traffic coordination, reducing congestion.
-              </p>
-            </div>
+          <Sandbox 
+            nodes={nodes} setNodes={setNodes} 
+            links={links} setLinks={setLinks}
+            protocol={protocol} setProtocol={setProtocol}
+            onSimulationComplete={handleSimulationComplete}
+          />
+
+          <div style={{ marginTop: '2rem' }}>
+            <Section title="Strategic Analysis" icon={Clock}>
+              <div className="grid-2">
+                <div className="glass-panel" style={{ borderLeft: '4px solid var(--accent)' }}>
+                  <h4>Link-State (OSPF)</h4>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Optimal for high-density metropolitan mesh networks with frequent topology shifts.</p>
+                </div>
+                <div className="glass-panel" style={{ borderLeft: '4px solid #10B981' }}>
+                  <h4>Distance Vector (RIP)</h4>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Suited for localized edge subnets where computational overhead is a constraint.</p>
+                </div>
+              </div>
+            </Section>
           </div>
-        </Section>
+        </main>
 
-        <Sandbox />
+        {/* Right Sidebar: AI Intelligence */}
+        <aside className={`sidebar right ${!rightOpen ? 'collapsed' : ''}`}>
+           <div style={{ padding: '2rem' }}>
+              <Section title="AI Architect" icon={Bot}>
+                 <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>Describe the desired network constraints.</p>
+                 <textarea 
+                    placeholder="e.g. Generate a redundant star topology for a city center with 6 routers..."
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    style={{ width: '100%', height: '120px', padding: '1rem', borderRadius: '10px', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid var(--border-color)', fontSize: '0.875rem', resize: 'none' }}
+                 />
+                 {aiError && (
+                   <div style={{ marginTop: '0.5rem', color: '#ef4444', fontSize: '0.75rem', background: 'rgba(239, 68, 68, 0.1)', padding: '0.5rem', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                     <AlertTriangle size={12} inline style={{ marginRight: '0.25rem' }} /> {aiError}
+                   </div>
+                 )}
+                 <button 
+                  className="btn" 
+                  onClick={handleAiGenerate}
+                  disabled={isAiGenerating}
+                  style={{ width: '100%', marginTop: '1rem', justifyContent: 'center' }}
+                 >
+                    {isAiGenerating ? <Loader2 className="spin" size={18} /> : "Generate Topology"}
+                 </button>
+              </Section>
 
-        <Section title="Expected Outcomes" icon={Clock}>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-            Based on the comparative analysis within simulation environments (e.g., Packet Tracer, NS3), the data supports distinct deployment recommendations based on the target scale and complexity of the Smart City layer.
-          </p>
-          <div className="grid-2">
-            <div className="glass-panel" style={{ borderLeft: '4px solid var(--accent)' }}>
-              <h3>Link-State (OSPF)</h3>
-              <p style={{ color: 'var(--text-secondary)' }}>Performs optimally in large-scale networks with high traffic loads and frequent topology changes due to rapid convergence and loop-free operation via Dijkstra's SPF.</p>
-            </div>
-            <div className="glass-panel" style={{ borderLeft: '4px solid #10B981' }}>
-              <h3>Distance Vector (RIP)</h3>
-              <p style={{ color: 'var(--text-secondary)' }}>Better suited for localized, low-complexity edge networks where computational resource conservation is more critical than sub-second convergence.</p>
-            </div>
-          </div>
-        </Section>
-      </main>
+              <Section title="NetAudit AI" icon={Layout}>
+                 <div className="glass-panel" style={{ fontSize: '0.875rem', borderLeft: '3px solid var(--accent)', padding: '1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent)', marginBottom: '0.5rem' }}>
+                       {isAiAnalyzing ? <Loader2 className="spin" size={16} /> : <Activity size={16} />} 
+                       Status: {isAiAnalyzing ? 'Analyzing...' : (aiAnalysis ? 'Audit Complete' : (auditError ? 'Error' : 'Idle'))}
+                    </div>
+                    <p style={{ color: auditError ? '#ef4444' : 'var(--text-secondary)', fontStyle: (aiAnalysis || auditError) ? 'normal' : 'italic', fontSize: '0.8rem' }}>
+                       {auditError || aiAnalysis || "Provide a topology to start automated comparative analysis using LLM reasoning."}
+                    </p>
+                 </div>
+              </Section>
+           </div>
+        </aside>
 
-      <footer>
-        <p>Comparative Performance Evaluation Method &copy; 2026</p>
-        <p style={{ marginTop: '0.5rem' }}>Analyzing Convergence, Packet Delivery, Delay, and Overhead</p>
-      </footer>
+        {/* Floating Toggles */}
+        <button className="sidebar-toggle left" onClick={() => setLeftOpen(!leftOpen)} title={leftOpen ? "Close Knowledge Hub" : "Open Knowledge Hub"}>
+           {leftOpen ? <ChevronLeft /> : <GraduationCap />}
+        </button>
+        <button className="sidebar-toggle right" onClick={() => setRightOpen(!rightOpen)} title={rightOpen ? "Close AI Intelligence" : "Open AI Intelligence"}>
+           {rightOpen ? <ChevronRight /> : <Bot />}
+        </button>
+      </div>
     </div>
   );
 }
