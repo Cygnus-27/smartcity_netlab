@@ -1,0 +1,33 @@
+
+> temp-app@0.1.0 build
+> react-scripts build
+
+Creating an optimized production build...
+Compiled with warnings.
+
+[eslint] 
+src/App.js
+  Line 300:6:  React Hook useEffect has a missing dependency: 'setNodes'. Either include it or remove the dependency array. If 'setNodes' changes too often, find the parent component that defines it and wrap that definition in useCallback  react-hooks/exhaustive-deps
+
+Search for the keywords to learn more about each warning.
+To ignore, add // eslint-disable-next-line to the line before.
+
+File sizes after gzip:
+
+  75.83 kB  build/static/js/main.0001187d.js
+  2.63 kB   build/static/css/main.b0c1afdb.css
+  1.77 kB   build/static/js/453.45547c62.chunk.js
+
+The project was built assuming it is hosted at /.
+You can control this with the homepage field in your package.json.
+
+The build folder is ready to be deployed.
+You may serve it with a static server:
+
+  npm install -g serve
+  serve -s build
+
+Find out more about deployment here:
+
+  https://cra.link/deployment
+
